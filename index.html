@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Guardias</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#F3F0EE">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Guardias">
+<link rel="apple-touch-icon" href="./icon-192.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sofia+Sans:wght@450;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --canvas:#F3F0EE; --lifted:#FCFBFA; --white:#FFFFFF;
+    --ink:#141413; --charcoal:#262627; --slate:#696969; --taupe:#D1CDC7;
+    --signal:#CF4500; --arc:#F37338; --clay:#9A3A0A; --blue:#3860BE;
+    --line:rgba(20,20,19,.12); --hair:rgba(20,20,19,.08);
+    --sh1:rgba(0,0,0,0.04) 0px 4px 24px 0px;
+    --sh2:rgba(0,0,0,0.08) 0px 24px 48px 0px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  body{
+    background:var(--canvas);color:var(--ink);
+    font-family:"Sofia Sans",Arial,sans-serif;font-weight:450;
+    min-height:100vh;padding:max(env(safe-area-inset-top),20px) 16px 118px;
+    max-width:520px;margin:0 auto;
+  }
+  .num{font-family:inherit;font-variant-numeric:tabular-nums;font-weight:500}
+
+  header{display:flex;flex-direction:column;gap:2px;margin-bottom:14px;padding:0 4px}
+  .eyebrow{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--slate)}
+  .eyebrow::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--arc);margin-right:7px;vertical-align:2px}
+  header h1{font-size:1.9rem;font-weight:500;letter-spacing:-0.02em;color:var(--ink)}
+  header h1 span{color:var(--ink)}
+  #storageWarn{color:var(--signal);font-size:.74rem;margin-bottom:10px;display:none;padding:0 4px}
+
+  .monthnav{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:14px}
+  .monthnav button{background:var(--white);border:1px solid var(--ink);color:var(--ink);
+    border-radius:50%;width:40px;height:40px;font-size:1rem;cursor:pointer;font-family:inherit}
+  .monthnav button:active{transform:scale(.96)}
+  .monthnav .mlabel{min-width:150px;text-align:center;font-size:1.05rem;font-weight:500;
+    letter-spacing:-0.02em;text-transform:capitalize}
+
+  .card{background:var(--lifted);border:none;border-radius:40px;
+    padding:24px;margin-bottom:16px;box-shadow:var(--sh2)}
+  label.field{display:block}
+  label.field .lbl{display:block;font-size:11px;font-weight:700;letter-spacing:.04em;
+    text-transform:uppercase;color:var(--slate);margin-bottom:6px}
+  label.field input{width:100%;background:var(--white);border:1px solid rgba(20,20,19,.5);
+    border-radius:999px;color:var(--ink);font-size:1.1rem;font-weight:500;
+    padding:10px 18px;font-family:inherit;font-variant-numeric:tabular-nums}
+  label.field input:focus{outline:none;border-color:var(--ink);border-width:1.5px}
+  .row3{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:10px}
+
+  .restante{display:flex;justify-content:space-between;align-items:baseline;padding:2px 2px 8px}
+  .restante .v{font-size:1.5rem;font-weight:500;letter-spacing:-0.02em}
+  .warn{color:var(--signal);font-size:.8rem;margin:4px 2px 8px;display:none}
+  .warn.show{display:block}
+  .meta{color:var(--slate);font-size:.8rem;margin-top:6px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:2px 10px}
+  .meta .num{color:var(--ink)}
+
+  .actions{display:flex;gap:10px;margin-top:12px}
+  button.btn{flex:1;background:var(--white);color:var(--ink);border:1.5px solid var(--ink);
+    border-radius:20px;padding:11px 18px;font-size:.95rem;font-family:inherit;font-weight:450;cursor:pointer}
+  button.btn.primary{background:var(--ink);color:var(--canvas);font-weight:500;letter-spacing:-0.02em}
+  button.btn:active{transform:translateY(1px) scale(.99)}
+
+  h2.sec{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+    color:var(--slate);margin:22px 8px 10px}
+  h2.sec::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;
+    background:var(--arc);margin-right:7px;vertical-align:2px}
+
+  .mov{display:flex;align-items:baseline;gap:8px;padding:9px 0;border-bottom:1px solid var(--hair);font-size:.9rem}
+  .mov:last-child{border-bottom:none}
+  .mov .d{color:var(--slate);font-size:.78rem;min-width:64px;text-transform:capitalize}
+  .mov .a{flex:1}
+  .mov .del{background:none;border:none;color:var(--slate);font-size:1rem;cursor:pointer;padding:0 4px}
+  .empty{color:var(--taupe);font-size:.9rem;text-align:center;padding:16px 0;font-weight:500}
+  .gain{font-weight:500}
+  .gain.pos{color:var(--blue)} .gain.neg{color:var(--signal)}
+
+  /* ==== calendario ==== */
+  .modes{display:flex;gap:10px;margin-bottom:14px}
+  .mode{flex:1;background:var(--white);border:1.5px solid var(--ink);color:var(--ink);border-radius:999px;
+    padding:9px;font-family:inherit;font-weight:500;font-size:.85rem;cursor:pointer;letter-spacing:-0.02em}
+  .mode.on{background:var(--ink);color:var(--canvas)}
+  .calhead{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px;
+    color:var(--slate);font-size:11px;font-weight:700;text-align:center;letter-spacing:.04em;text-transform:uppercase}
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+  .day{aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:50%;
+    background:none;border:1px solid var(--line);cursor:pointer;position:relative;user-select:none}
+  .day.off{border:none;cursor:default}
+  .day .dn{font-size:.9rem;font-weight:500;font-variant-numeric:tabular-nums}
+  .day .dn.red{color:var(--clay)}
+  .day.g{background:var(--ink);border-color:var(--ink)}
+  .day.g .dn{color:var(--canvas)}
+  .day.p{background:var(--arc);border-color:var(--arc)}
+  .day.p .dn{color:var(--white)}
+  .day.f::after{content:"";position:absolute;bottom:3px;left:50%;transform:translateX(-50%);
+    width:6px;height:6px;border-radius:50%;background:var(--signal)}
+  .day.g.f::after,.day.p.f::after{background:var(--white)}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;color:var(--slate);font-size:.76rem}
+  .legend .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+  .legend .dot.g{background:var(--ink)}
+  .legend .dot.p{background:var(--arc)}
+  .legend .dot.f{background:var(--signal)}
+
+  /* ==== tarifas ==== */
+  .tarifas{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .tarifa .l{display:block;color:var(--slate);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px}
+  .tarifa input{width:100%;background:var(--white);border:1px solid rgba(20,20,19,.5);border-radius:999px;color:var(--ink);
+    padding:8px 14px;font-size:.95rem;font-weight:500;font-family:inherit;font-variant-numeric:tabular-nums}
+  .tarifa input:focus{outline:none;border-color:var(--ink);border-width:1.5px}
+
+  /* ==== peonadas y pluses ==== */
+  .peo{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--hair)}
+  .peo:last-child{border-bottom:none}
+  .peo .name{flex:1;font-size:.92rem}
+  .peo .mini{display:flex;flex-direction:column;gap:3px}
+  .peo .mini span{color:var(--slate);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+  .peo .mini input{width:76px;background:var(--white);border:1px solid rgba(20,20,19,.5);border-radius:999px;color:var(--ink);
+    padding:7px 12px;font-size:.9rem;font-weight:500;font-family:inherit;font-variant-numeric:tabular-nums}
+  .peo .mini input:focus{outline:none;border-color:var(--ink)}
+  .peo .imp{min-width:84px;text-align:right;font-size:.92rem}
+  .peo select.per{background:var(--white);border:1px solid rgba(20,20,19,.5);border-radius:999px;color:var(--ink);
+    padding:8px 10px;font-size:.85rem;font-family:inherit}
+  .chk{display:flex;align-items:center;gap:9px;font-size:.92rem;cursor:pointer}
+  .chk.grow{flex:1}
+  .chk input{accent-color:var(--ink);width:17px;height:17px}
+  select{background:var(--white);border:1px solid rgba(20,20,19,.5);border-radius:999px;color:var(--ink);
+    font-size:.95rem;padding:10px 16px;font-family:inherit;width:100%}
+  select:focus{outline:none;border-color:var(--ink)}
+
+  /* ==== navegación flotante ==== */
+  nav.tabs{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);
+    width:min(492px, calc(100% - 28px));display:flex;gap:4px;
+    background:var(--white);border:none;border-radius:999px;box-shadow:var(--sh1);
+    padding:6px}
+  nav.tabs button{flex:1;background:none;border:none;color:var(--ink);padding:11px 0;
+    font-size:.86rem;font-family:inherit;font-weight:500;cursor:pointer;
+    letter-spacing:-0.02em;border-radius:999px}
+  nav.tabs button.on{background:var(--ink);color:var(--canvas)}
+  .page{display:none} .page.on{display:block}
+
+  .toast{position:fixed;left:50%;bottom:88px;transform:translateX(-50%) translateY(16px);
+    background:var(--ink);color:var(--canvas);
+    padding:10px 22px;border-radius:999px;font-size:.86rem;font-weight:500;
+    box-shadow:var(--sh2);opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:9}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  @media(prefers-reduced-motion:reduce){.toast{transition:none}}
+</style>
+</head>
+<body>
+
+<header><div class="eyebrow">Calculadora</div><h1>Guardias</h1></header>
+<div id="storageWarn">⚠ Sin almacenamiento persistente: los datos se perderán al cerrar. Abre el archivo directamente en el navegador para guardar.</div>
+
+<div class="monthnav">
+  <button id="prevM" aria-label="Mes anterior">‹</button>
+  <div class="mlabel num" id="mlabel"></div>
+  <button id="nextM" aria-label="Mes siguiente">›</button>
+</div>
+
+<!-- ============ GUARDIAS ============ -->
+<div class="page on" id="pageGuardias">
+  <div class="card">
+    <div class="modes">
+      <button class="mode on" data-mode="g">Guardias</button>
+      <button class="mode" data-mode="f">Festivos</button>
+    </div>
+    <div class="calhead" id="calhead"></div>
+    <div class="cal" id="cal"></div>
+    <div class="legend">
+      <span><i class="dot g"></i> Guardia (pres.+loc.)</span>
+      <span><i class="dot p"></i> Presencia 24h</span>
+      <span><i class="dot f"></i> Festivo</span>
+    </div>
+    <div class="meta" style="margin-top:8px"><span>En modo Guardias, cada toque alterna: nada → guardia → presencia completa → nada</span></div>
+  </div>
+
+  <h2 class="sec">Horas del mes</h2>
+  <div class="card" id="horasMes"></div>
+
+  <h2 class="sec">Tarifas €/hora · convenio marzo 2026</h2>
+  <div class="card">
+    <div class="tarifas" id="tarifas"></div>
+    <div class="actions">
+      <button class="btn" id="btnSubida">Aplicar subida %</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PEONADAS ============ -->
+<div class="page" id="pagePeonadas">
+  <div class="card">
+    <div class="restante"><span>Total peonadas del mes</span><span class="v num" id="totPeonadas">—</span></div>
+    <div id="peoList"></div>
+    <div class="actions">
+      <button class="btn" id="btnAddPeo">Añadir tipo</button>
+    </div>
+    <div class="meta" style="margin-top:8px"><span>Precio editable por tipo (aún por confirmar) · cantidad por mes</span></div>
+  </div>
+</div>
+
+<!-- ============ SALARIO ============ -->
+<div class="page" id="pageSalario">
+  <div class="card">
+    <label class="field" style="margin-bottom:12px">
+      <span class="lbl">Categoría</span>
+      <select id="selCat"></select>
+    </label>
+    <div class="row3" style="grid-template-columns:1fr 1fr">
+      <label class="field"><span class="lbl">Salario base €/mes</span><input id="salBase" type="number" inputmode="decimal" step="0.01"></label>
+      <label class="field"><span class="lbl">Plus dedicación €/mes</span><input id="plusDed" type="number" inputmode="decimal" step="0.01"></label>
+    </div>
+    <label class="chk" style="margin-top:10px"><input type="checkbox" id="dedOn"> Cobro el plus de dedicación</label>
+  </div>
+
+  <h2 class="sec">Pluses y complementos</h2>
+  <div class="card" id="plusList"></div>
+
+  <div class="card">
+    <div class="restante"><span>Fijo mensual total</span><span class="v num" id="totFijo">—</span></div>
+    <div class="meta"><span>Salario base + dedicación + pluses activos (los anuales, divididos entre 12)</span></div>
+  </div>
+
+  <div class="actions">
+    <button class="btn" id="btnExport">Exportar copia</button>
+    <button class="btn" id="btnImport">Importar</button>
+    <input type="file" id="importFile" accept=".json" style="display:none">
+  </div>
+</div>
+
+<!-- ============ NÓMINA ============ -->
+<div class="page" id="pageNomina">
+  <div class="card">
+    <div id="nomDesglose"></div>
+    <div class="restante" style="border-top:1px solid var(--line);margin-top:8px;padding-top:10px">
+      <span>Bruto esperado</span><span class="v num" id="nomEsperado">—</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <label class="chk"><input type="checkbox" id="pagoSig"> Guardias y peonadas se cobran al mes siguiente</label>
+    <label class="field" style="margin-top:12px">
+      <span class="lbl">Nómina bruta real de este mes €</span>
+      <input id="nomReal" type="number" inputmode="decimal" step="0.01" placeholder="—">
+    </label>
+    <div class="restante" style="margin-top:10px">
+      <span>Diferencia</span><span class="v num gain" id="nomDiff">—</span>
+    </div>
+  </div>
+</div>
+
+<nav class="tabs">
+  <button class="on" data-page="pageGuardias">Guardias</button>
+  <button data-page="pagePeonadas">Peonadas</button>
+  <button data-page="pageSalario">Salario</button>
+  <button data-page="pageNomina">Nómina</button>
+</nav>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+// ================= persistencia =================
+const KEY = "guardias_app_v1";
+function loadState(){
+  try { const raw = localStorage.getItem(KEY); if (raw) return normalize(JSON.parse(raw)); }
+  catch(e){ document.getElementById("storageWarn").style.display = "block"; }
+  return null;
+}
+function saveState(){
+  try { localStorage.setItem(KEY, JSON.stringify(state)); }
+  catch(e){ document.getElementById("storageWarn").style.display = "block"; }
+}
+function normalize(s){
+  const D = DEFAULTS;
+  for (const k of Object.keys(D)) if (!(k in s)) s[k] = JSON.parse(JSON.stringify(D[k]));
+  for (const k of Object.keys(D.config)) if (!(k in s.config)) s.config[k] = JSON.parse(JSON.stringify(D.config[k]));
+  if (!s.festivos) s.festivos = {};
+  if (!s.months) s.months = {};
+  return s;
+}
+
+// ================= modelo (tabla salarial marzo 2026, +1,5% desde enero) =================
+const DEFAULTS = {
+  config: {
+    tarifas: { presLab:43.38, presSab:47.10, presFes:47.10, locLab:18.80, locSab:20.63, locFes:23.25 },
+    categorias: [
+      { id:"esp",  name:"Especialista",        salario:4149.49, dedicacion:242.03 },
+      { id:"sen",  name:"Especialista Senior", salario:4567.52, dedicacion:461.65 },
+      { id:"con1", name:"Consultor/a 1",       salario:5025.05, dedicacion:784.86 },
+      { id:"con2", name:"Consultor/a 2",       salario:5527.54, dedicacion:784.86 },
+      { id:"csen", name:"Consultor/a Senior",  salario:6080.29, dedicacion:923.34 },
+    ],
+    categoria: "esp",
+    salarioBase: 4149.49,
+    plusDedicacion: 242.03,
+    dedicacionOn: false,
+    pluses: [
+      { id:"cra",   name:"CRA",                        importe:232.55,  periodo:"mensual", on:false },
+      { id:"atc",   name:"Compl. atención continuada", importe:2464.01, periodo:"anual",   on:false },
+      { id:"prol",  name:"Compl. prolongación guardias", importe:2414.73, periodo:"anual", on:false },
+      { id:"tutor", name:"Tutor de residentes",        importe:5000,    periodo:"anual",   on:false },
+      { id:"cdoc",  name:"Coordinador/a de docencia",  importe:4298.71, periodo:"anual",   on:false },
+      { id:"crec",  name:"Coordinador/a de recerca",   importe:4298.71, periodo:"anual",   on:false },
+    ],
+    peonadaTipos: [
+      { id:"ecoT", name:"ECO de técnico",  precio:13 },
+      { id:"ecoP", name:"ECO presencial",  precio:13 },
+      { id:"rm",   name:"RM",              precio:18.45 },
+      { id:"tac",  name:"TAC",             precio:0 },
+    ],
+    pagoMesSiguiente: true,
+  },
+  festivos: {},   // "2026-08-15": true
+  months: {},     // "2026-07": { guardias:{"2026-07-14":"n"|"p"}, peonadas:{tipoId:n}, nomReal:"" }
+};
+let state = loadState() || JSON.parse(JSON.stringify(DEFAULTS));
+
+// ================= utilidades =================
+const $ = id => document.getElementById(id);
+const fmt = n => (isFinite(n) ? n : 0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2}) + " €";
+const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
+const now = new Date();
+let curY = now.getFullYear(), curM = now.getMonth();
+let calMode = "g";
+const ymKey = (y,m) => `${y ?? curY}-${String((m ?? curM)+1).padStart(2,"0")}`;
+const ymLabel = ym => { const [y,m] = ym.split("-"); return MESES[+m-1] + " " + y; };
+function toast(msg){
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove("show"), 1800);
+}
+function monthData(k){
+  k = k || ymKey();
+  if (!state.months[k]) state.months[k] = { guardias:{}, peonadas:{}, nomReal:"" };
+  const m = state.months[k];
+  if (!m.guardias) m.guardias = {};
+  if (!m.peonadas) m.peonadas = {};
+  return m;
+}
+const dstr = (y,m,d) => `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+function nextDay(ds){
+  const t = new Date(ds + "T12:00:00"); t.setDate(t.getDate()+1);
+  return dstr(t.getFullYear(), t.getMonth(), t.getDate());
+}
+// tipo de día: laborable / sábado / festivo (domingos y marcados)
+function dayType(ds){
+  if (state.festivos[ds]) return "Fes";
+  const w = new Date(ds + "T12:00:00").getDay();
+  if (w === 0) return "Fes";
+  if (w === 6) return "Sab";
+  return "Lab";
+}
+
+// ================= cálculo de horas =================
+// Guardia normal ('n'): entre semana 6h pres + 2h loc + 8h loc (madrugada, tipo del día siguiente)
+//                       sáb/festivo 14h pres + 2h loc + 8h loc (madrugada)
+// Presencia 24h ('p'): mismos tramos, pero todo a tarifa de presencia
+function guardiaHoras(ds, tipo){
+  const t = dayType(ds), tn = dayType(nextDay(ds));
+  const H = { presLab:0, presSab:0, presFes:0, locLab:0, locSab:0, locFes:0 };
+  const pre = "pres", loc = (tipo === "p") ? "pres" : "loc";
+  if (t === "Lab"){
+    H[pre + "Lab"] += 6;
+    H[loc + "Lab"] += 2;
+    H[loc + tn]    += 8;
+  } else {
+    H[pre + t]  += 14;
+    H[loc + t]  += 2;
+    H[loc + tn] += 8;
+  }
+  return H;
+}
+function horasMes(k){
+  const m = monthData(k);
+  const tot = { presLab:0, presSab:0, presFes:0, locLab:0, locSab:0, locFes:0 };
+  Object.keys(m.guardias).forEach(ds => {
+    const H = guardiaHoras(ds, m.guardias[ds]);
+    Object.keys(H).forEach(x => tot[x] += H[x]);
+  });
+  return tot;
+}
+function eurosGuardias(k){
+  const H = horasMes(k), T = state.config.tarifas;
+  return Object.keys(H).reduce((s,x)=>s + H[x]*(T[x]||0), 0);
+}
+function eurosPeonadas(k){
+  const m = monthData(k);
+  return state.config.peonadaTipos.reduce((s,t)=>s + (parseFloat(m.peonadas[t.id])||0)*t.precio, 0);
+}
+function fijoMensual(){
+  const c = state.config;
+  let t = (parseFloat(c.salarioBase)||0) + (c.dedicacionOn ? (parseFloat(c.plusDedicacion)||0) : 0);
+  c.pluses.forEach(p => { if (p.on) t += p.periodo==="anual" ? p.importe/12 : p.importe; });
+  return t;
+}
+
+// ================= render: guardias =================
+const DIAS = ["L","M","X","J","V","S","D"];
+function renderCal(){
+  $("calhead").innerHTML = DIAS.map(d=>`<div>${d}</div>`).join("");
+  const first = new Date(curY, curM, 1);
+  const nDays = new Date(curY, curM+1, 0).getDate();
+  let start = first.getDay(); start = (start === 0) ? 6 : start-1; // lunes=0
+  const m = monthData();
+  const cal = $("cal"); cal.innerHTML = "";
+  for (let i=0;i<start;i++){ const e=document.createElement("div"); e.className="day off"; cal.appendChild(e); }
+  for (let d=1; d<=nDays; d++){
+    const ds = dstr(curY, curM, d);
+    const g = m.guardias[ds];
+    const cell = document.createElement("div");
+    cell.className = "day" + (g==="n"?" g":"") + (g==="p"?" p":"") + (state.festivos[ds]?" f":"");
+    const w = new Date(ds+"T12:00:00").getDay();
+    cell.innerHTML = `<span class="dn${(w===0||state.festivos[ds])?" red":""}">${d}</span>`;
+    cell.onclick = () => {
+      if (calMode === "f"){
+        if (state.festivos[ds]) delete state.festivos[ds]; else state.festivos[ds] = true;
+      } else {
+        if (!g) m.guardias[ds] = "n";
+        else if (g === "n") m.guardias[ds] = "p";
+        else delete m.guardias[ds];
+      }
+      saveState(); renderAll();
+    };
+    cal.appendChild(cell);
+  }
+}
+const HLBL = { presLab:"Presencia laborable", presSab:"Presencia sábado", presFes:"Presencia festivo",
+               locLab:"Localizable laborable", locSab:"Localizable sábado", locFes:"Localizable festivo" };
+function renderHoras(){
+  const H = horasMes(), T = state.config.tarifas;
+  const mount = $("horasMes"); mount.innerHTML = "";
+  let tot = 0, any = false;
+  Object.keys(H).forEach(x=>{
+    if (!H[x]) return;
+    any = true;
+    const imp = H[x]*T[x]; tot += imp;
+    const div = document.createElement("div");
+    div.className = "mov";
+    div.innerHTML = `<span class="a">${HLBL[x]}</span>
+      <span class="num" style="min-width:52px;text-align:right">${H[x]} h</span>
+      <span class="num" style="min-width:96px;text-align:right">${fmt(imp)}</span>`;
+    mount.appendChild(div);
+  });
+  if (!any) mount.innerHTML = `<div class="empty">Marca tus guardias en el calendario</div>`;
+  else {
+    const t = document.createElement("div");
+    t.className = "mov";
+    t.innerHTML = `<span class="a" style="font-weight:600">Total guardias</span>
+      <span class="num" style="min-width:96px;text-align:right;color:var(--cyan)">${fmt(tot)}</span>`;
+    mount.appendChild(t);
+  }
+}
+const TLBL = { presLab:"Pres. laborable", presSab:"Pres. sábado", presFes:"Pres. festivo",
+               locLab:"Loc. laborable", locSab:"Loc. sábado", locFes:"Loc. dom/festivo" };
+function renderTarifas(){
+  const T = state.config.tarifas;
+  const mount = $("tarifas"); mount.innerHTML = "";
+  Object.keys(T).forEach(x=>{
+    const div = document.createElement("label");
+    div.className = "tarifa";
+    div.innerHTML = `<span class="l">${TLBL[x]}</span><input type="number" inputmode="decimal" step="0.01" value="${T[x]}">`;
+    div.querySelector("input").onchange = e => {
+      const v = parseFloat(e.target.value);
+      if (isFinite(v)) { T[x] = v; saveState(); renderAll(); }
+    };
+    mount.appendChild(div);
+  });
+}
+
+// ================= render: peonadas =================
+function renderPeonadas(){
+  const m = monthData();
+  const mount = $("peoList"); mount.innerHTML = "";
+  state.config.peonadaTipos.forEach(t=>{
+    const n = m.peonadas[t.id] || "";
+    const div = document.createElement("div");
+    div.className = "peo";
+    div.innerHTML = `
+      <span class="name">${t.name}</span>
+      <label class="mini"><span>€/ud</span><input class="precio" type="number" inputmode="decimal" step="0.01" value="${t.precio}"></label>
+      <label class="mini"><span>uds</span><input class="uds" type="number" inputmode="numeric" step="1" min="0" value="${n}" placeholder="0"></label>
+      <span class="num imp">${fmt((parseFloat(n)||0)*t.precio)}</span>`;
+    div.querySelector(".precio").onchange = e => {
+      const v = parseFloat(e.target.value);
+      if (isFinite(v)) { t.precio = v; saveState(); renderAll(); }
+    };
+    div.querySelector(".uds").oninput = e => {
+      m.peonadas[t.id] = e.target.value;
+      saveState(); renderPeonadas(); renderNomina();
+    };
+    mount.appendChild(div);
+  });
+  $("totPeonadas").textContent = fmt(eurosPeonadas(ymKey()));
+}
+$("btnAddPeo").onclick = ()=>{
+  const name = prompt("Nombre del nuevo tipo de peonada:");
+  if (!name) return;
+  state.config.peonadaTipos.push({ id:"t"+Date.now(), name: name.trim(), precio:0 });
+  saveState(); renderPeonadas();
+};
+
+// ================= render: salario =================
+function renderSalario(){
+  const c = state.config;
+  const sel = $("selCat");
+  const opts = c.categorias.map(x=>`<option value="${x.id}">${x.name}</option>`).join("");
+  if (sel.innerHTML !== opts) sel.innerHTML = opts;
+  sel.value = c.categoria;
+  $("salBase").value = c.salarioBase;
+  $("plusDed").value = c.plusDedicacion;
+  $("dedOn").checked = !!c.dedicacionOn;
+
+  const mount = $("plusList"); mount.innerHTML = "";
+  c.pluses.forEach(p=>{
+    const div = document.createElement("div");
+    div.className = "peo";
+    div.innerHTML = `
+      <label class="chk grow"><input type="checkbox" ${p.on?"checked":""}> ${p.name}</label>
+      <label class="mini"><span>€</span><input class="imp" type="number" inputmode="decimal" step="0.01" value="${p.importe}"></label>
+      <select class="per"><option value="mensual" ${p.periodo==="mensual"?"selected":""}>/mes</option><option value="anual" ${p.periodo==="anual"?"selected":""}>/año</option></select>`;
+    div.querySelector("input[type=checkbox]").onchange = e => { p.on = e.target.checked; saveState(); renderAll(); };
+    div.querySelector(".imp").onchange = e => {
+      const v = parseFloat(e.target.value);
+      if (isFinite(v)) { p.importe = v; saveState(); renderAll(); }
+    };
+    div.querySelector(".per").onchange = e => { p.periodo = e.target.value; saveState(); renderAll(); };
+    mount.appendChild(div);
+  });
+  $("totFijo").textContent = fmt(fijoMensual());
+}
+$("selCat").onchange = ()=>{
+  const c = state.config;
+  c.categoria = $("selCat").value;
+  const cat = c.categorias.find(x=>x.id===c.categoria);
+  if (cat){ c.salarioBase = cat.salario; c.plusDedicacion = cat.dedicacion; }
+  saveState(); renderAll();
+};
+$("salBase").onchange = ()=>{ const v = parseFloat($("salBase").value); if (isFinite(v)){ state.config.salarioBase = v; saveState(); renderAll(); } };
+$("plusDed").onchange = ()=>{ const v = parseFloat($("plusDed").value); if (isFinite(v)){ state.config.plusDedicacion = v; saveState(); renderAll(); } };
+$("dedOn").onchange = ()=>{ state.config.dedicacionOn = $("dedOn").checked; saveState(); renderAll(); };
+$("btnSubida").onclick = ()=>{
+  const inp = prompt("Subida a aplicar a tarifas, salarios y pluses (%). Ej: 1,5");
+  if (inp === null) return;
+  const p = parseFloat(String(inp).replace(",","."));
+  if (!isFinite(p)) { toast("Porcentaje no válido"); return; }
+  const f = 1 + p/100, c = state.config;
+  Object.keys(c.tarifas).forEach(x => c.tarifas[x] = +(c.tarifas[x]*f).toFixed(2));
+  c.salarioBase = +(c.salarioBase*f).toFixed(2);
+  c.plusDedicacion = +(c.plusDedicacion*f).toFixed(2);
+  c.categorias.forEach(x => { x.salario = +(x.salario*f).toFixed(2); x.dedicacion = +(x.dedicacion*f).toFixed(2); });
+  c.pluses.forEach(x => x.importe = +(x.importe*f).toFixed(2));
+  saveState(); renderAll(); toast(`Subida del ${p}% aplicada`);
+};
+
+// ================= render: nómina =================
+function prevYm(){
+  let y = curY, m = curM - 1;
+  if (m < 0){ m = 11; y--; }
+  return ymKey(y, m);
+}
+function renderNomina(){
+  const c = state.config;
+  $("pagoSig").checked = !!c.pagoMesSiguiente;
+  const kVar = c.pagoMesSiguiente ? prevYm() : ymKey();
+  const g = eurosGuardias(kVar), p = eurosPeonadas(kVar);
+  const lines = [
+    ["Salario base", parseFloat(c.salarioBase)||0],
+    ...(c.dedicacionOn ? [["Plus dedicación", parseFloat(c.plusDedicacion)||0]] : []),
+    ...c.pluses.filter(x=>x.on).map(x=>[x.name + (x.periodo==="anual"?" (1/12)":""), x.periodo==="anual"?x.importe/12:x.importe]),
+    [`Guardias de ${ymLabel(kVar)}`, g],
+    [`Peonadas de ${ymLabel(kVar)}`, p],
+  ];
+  const mount = $("nomDesglose"); mount.innerHTML = "";
+  let tot = 0;
+  lines.forEach(([n,v])=>{
+    tot += v;
+    const div = document.createElement("div");
+    div.className = "mov";
+    div.innerHTML = `<span class="a">${n}</span><span class="num" style="min-width:96px;text-align:right">${fmt(v)}</span>`;
+    mount.appendChild(div);
+  });
+  $("nomEsperado").textContent = fmt(tot);
+
+  const m = monthData();
+  $("nomReal").value = m.nomReal || "";
+  const real = parseFloat(m.nomReal);
+  const el = $("nomDiff");
+  if (isFinite(real)){
+    const d = real - tot;
+    el.textContent = (d>=0?"+":"") + fmt(d);
+    el.className = "v num gain " + (Math.abs(d) < 1 ? "pos" : (d>=0 ? "pos" : "neg"));
+  } else { el.textContent = "—"; el.className = "v num gain"; }
+}
+$("nomReal").oninput = ()=>{ monthData().nomReal = $("nomReal").value; saveState(); renderNomina(); };
+$("pagoSig").onchange = ()=>{ state.config.pagoMesSiguiente = $("pagoSig").checked; saveState(); renderNomina(); };
+
+// ================= navegación y comunes =================
+$("prevM").onclick = ()=>{ curM--; if(curM<0){curM=11;curY--;} renderAll(); };
+$("nextM").onclick = ()=>{ curM++; if(curM>11){curM=0;curY++;} renderAll(); };
+document.querySelectorAll(".mode").forEach(b=>{
+  b.onclick = ()=>{
+    document.querySelectorAll(".mode").forEach(x=>x.classList.remove("on"));
+    b.classList.add("on"); calMode = b.dataset.mode;
+  };
+});
+document.querySelectorAll("nav.tabs button").forEach(b=>{
+  b.onclick = ()=>{
+    document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.remove("on"));
+    document.querySelectorAll(".page").forEach(x=>x.classList.remove("on"));
+    b.classList.add("on"); $(b.dataset.page).classList.add("on");
+    renderAll();
+  };
+});
+$("btnExport").onclick = ()=>{
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type:"application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "guardias_copia_" + ymKey() + ".json";
+  a.click(); URL.revokeObjectURL(a.href);
+};
+$("btnImport").onclick = ()=> $("importFile").click();
+$("importFile").onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const data = JSON.parse(r.result);
+      if (!data.config || !data.months) throw new Error("formato");
+      state = normalize(data); saveState(); renderAll(); toast("Copia importada");
+    } catch(err){ toast("Archivo no válido"); }
+  };
+  r.readAsText(f);
+  e.target.value = "";
+};
+
+function renderAll(){
+  $("mlabel").textContent = ymLabel(ymKey());
+  renderCal(); renderHoras(); renderTarifas();
+  renderPeonadas(); renderSalario(); renderNomina();
+}
+renderAll();
+</script>
+
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>
