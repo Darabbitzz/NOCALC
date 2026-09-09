@@ -1,6 +1,6 @@
 /* Service worker de Guardias — v1
    Al actualizar la app, cambia el número de VERSION para forzar caché nueva. */
-const VERSION = "v1";
+const VERSION = "v2";
 const CACHE = "guardias-" + VERSION;
 const PRECACHE = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 

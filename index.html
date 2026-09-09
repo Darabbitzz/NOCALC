@@ -127,6 +127,22 @@
     padding:7px 12px;font-size:.9rem;font-weight:500;font-family:inherit;font-variant-numeric:tabular-nums}
   .peo .mini input:focus{outline:none;border-color:var(--ink)}
   .peo .imp{min-width:84px;text-align:right;font-size:.92rem}
+  .peo-count{display:flex;align-items:center;gap:6px}
+  .stepper{min-width:40px;min-height:40px;border:1px solid var(--ink);border-radius:50%;background:var(--white);color:var(--ink);font:inherit;cursor:pointer}
+  .stepper:disabled{opacity:.35;cursor:default}
+  .peo-count .uds{width:68px}
+  .guardia-edit{border-bottom:1px solid var(--line);padding:12px 0}
+  .guardia-edit:last-child{border-bottom:0}
+  .guardia-edit summary{cursor:pointer;font-weight:500;line-height:1.5}
+  .guardia-edit .tarifas{margin:14px 0}
+  .guardia-status{font-size:.8rem;color:var(--slate);margin:8px 0}
+  @media(max-width:520px){
+    #peoList .peo{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 12px}
+    #peoList .name{grid-column:1/-1;overflow-wrap:anywhere}
+    #peoList .peo-count{grid-column:1}
+    #peoList .imp{grid-column:2;grid-row:3;min-width:0}
+    #peoList .mini{min-width:0}
+  }
   .peo select.per{background:var(--white);border:1px solid rgba(20,20,19,.5);border-radius:999px;color:var(--ink);
     padding:8px 10px;font-size:.85rem;font-family:inherit}
   .chk{display:flex;align-items:center;gap:9px;font-size:.92rem;cursor:pointer}
@@ -185,6 +201,12 @@
 
   <h2 class="sec">Horas del mes</h2>
   <div class="card" id="horasMes"></div>
+
+  <h2 class="sec">Ajustar horas de una guardia</h2>
+  <div class="card">
+    <p class="meta">Abre una fecha para ajustar sus horas de presencia y localización. Solo cambia esa guardia; las demás mantienen el cálculo automático.</p>
+    <div id="guardiaEditors"></div>
+  </div>
 
   <h2 class="sec">Tarifas €/hora · convenio marzo 2026</h2>
   <div class="card">
@@ -378,11 +400,21 @@ function guardiaHoras(ds, tipo){
   }
   return H;
 }
+// Ajustes por fecha: no se alteran ni las reglas automáticas ni las guardias antiguas.
+function horasGuardia(ds, tipo, mes){
+  const auto = guardiaHoras(ds, tipo);
+  const ajuste = mes.horasGuardias && mes.horasGuardias[ds];
+  if (!ajuste || typeof ajuste !== "object") return auto;
+  for (const k of Object.keys(auto)) {
+    if (typeof ajuste[k] === "number" && Number.isFinite(ajuste[k]) && ajuste[k] >= 0) auto[k] = ajuste[k];
+  }
+  return auto;
+}
 function horasMes(k){
   const m = monthData(k);
   const tot = { presLab:0, presSab:0, presFes:0, locLab:0, locSab:0, locFes:0 };
   Object.keys(m.guardias).forEach(ds => {
-    const H = guardiaHoras(ds, m.guardias[ds]);
+    const H = horasGuardia(ds, m.guardias[ds], m);
     Object.keys(H).forEach(x => tot[x] += H[x]);
   });
   return tot;
@@ -423,6 +455,10 @@ function renderCal(){
       if (calMode === "f"){
         if (state.festivos[ds]) delete state.festivos[ds]; else state.festivos[ds] = true;
       } else {
+        if (m.horasGuardias && m.horasGuardias[ds]) {
+          if (!confirm("Cambiar el tipo o quitar esta guardia eliminará sus horas personalizadas. ¿Continuar?")) return;
+          delete m.horasGuardias[ds];
+        }
         if (!g) m.guardias[ds] = "n";
         else if (g === "n") m.guardias[ds] = "p";
         else delete m.guardias[ds];
@@ -434,6 +470,54 @@ function renderCal(){
 }
 const HLBL = { presLab:"Presencia laborable", presSab:"Presencia sábado", presFes:"Presencia festivo",
                locLab:"Localizable laborable", locSab:"Localizable sábado", locFes:"Localizable festivo" };
+function renderGuardiaEditors(){
+  const m = monthData(), mount = $("guardiaEditors");
+  mount.replaceChildren();
+  const fechas = Object.keys(m.guardias).sort();
+  if (!fechas.length) { mount.textContent = "Marca primero una guardia en el calendario."; return; }
+  fechas.forEach(ds => {
+    const box = document.createElement("details"); box.className = "guardia-edit";
+    const summary = document.createElement("summary");
+    const titulo = new Date(ds+"T12:00:00").toLocaleDateString("es-ES", {weekday:"short",day:"numeric",month:"short"});
+    summary.textContent = titulo + (m.guardias[ds] === "p" ? " · Presencia completa" : " · Presencia + localizable");
+    box.appendChild(summary);
+    const status = document.createElement("p"); status.className = "guardia-status";
+    const grid = document.createElement("div"); grid.className = "tarifas";
+    const inputs = {};
+    function actualizar(){
+      const H = horasGuardia(ds,m.guardias[ds],m);
+      const total = Object.values(H).reduce((s,h)=>s+h,0);
+      status.textContent = (m.horasGuardias && m.horasGuardias[ds] ? "Personalizada" : "Automática") + " · " + total.toLocaleString("es-ES") + " h en total";
+    }
+    const H = horasGuardia(ds,m.guardias[ds],m);
+    Object.keys(HLBL).forEach(k => {
+      const label = document.createElement("label"); label.className = "tarifa";
+      const caption = document.createElement("span"); caption.className = "l"; caption.textContent = HLBL[k] + " (h)";
+      const input = document.createElement("input");
+      input.type = "number"; input.min = "0"; input.step = "any"; input.inputMode = "decimal";
+      input.value = H[k]; input.dataset.tramo = k; input.setAttribute("aria-label",titulo+" · "+HLBL[k]+" en horas");
+      inputs[k] = input;
+      input.oninput = () => {
+        const v = input.valueAsNumber;
+        if (!Number.isFinite(v) || v < 0) { input.setCustomValidity("Introduce un número de horas igual o mayor que cero."); return; }
+        input.setCustomValidity("");
+        if (!m.horasGuardias) m.horasGuardias = {};
+        m.horasGuardias[ds] = {...horasGuardia(ds,m.guardias[ds],m), [k]:v};
+        saveState(); actualizar(); renderHoras(); renderNomina();
+      };
+      input.onchange = () => { if (!input.checkValidity()) {input.value = horasGuardia(ds,m.guardias[ds],m)[k]; input.setCustomValidity("");} };
+      label.append(caption,input); grid.appendChild(label);
+    });
+    const reset = document.createElement("button"); reset.className = "btn"; reset.textContent = "Restaurar cálculo automático";
+    reset.onclick = () => {
+      if (m.horasGuardias) delete m.horasGuardias[ds];
+      const auto = guardiaHoras(ds,m.guardias[ds]);
+      Object.keys(inputs).forEach(k=>{inputs[k].value=auto[k];inputs[k].setCustomValidity("");});
+      saveState(); actualizar(); renderHoras(); renderNomina();
+    };
+    actualizar(); box.append(status,grid,reset); mount.appendChild(box);
+  });
+}
 function renderHoras(){
   const H = horasMes(), T = state.config.tarifas;
   const mount = $("horasMes"); mount.innerHTML = "";
@@ -484,18 +568,37 @@ function renderPeonadas(){
     const div = document.createElement("div");
     div.className = "peo";
     div.innerHTML = `
-      <span class="name">${t.name}</span>
+      <span class="name"></span>
       <label class="mini"><span>€/ud</span><input class="precio" type="number" inputmode="decimal" step="0.01" value="${t.precio}"></label>
-      <label class="mini"><span>uds</span><input class="uds" type="number" inputmode="numeric" step="1" min="0" value="${n}" placeholder="0"></label>
+      <div class="peo-count"><button type="button" class="stepper menos">−1</button><label class="mini"><span>uds</span><input class="uds" type="number" inputmode="numeric" step="1" min="0" value="${n}" placeholder="0"></label><button type="button" class="stepper mas">+1</button></div>
       <span class="num imp">${fmt((parseFloat(n)||0)*t.precio)}</span>`;
     div.querySelector(".precio").onchange = e => {
       const v = parseFloat(e.target.value);
       if (isFinite(v)) { t.precio = v; saveState(); renderAll(); }
     };
-    div.querySelector(".uds").oninput = e => {
-      m.peonadas[t.id] = e.target.value;
-      saveState(); renderPeonadas(); renderNomina();
+    div.querySelector(".name").textContent = t.name;
+    const uds = div.querySelector(".uds"), menos = div.querySelector(".menos"), mas = div.querySelector(".mas");
+    uds.setAttribute("aria-label", "Unidades de " + t.name);
+    menos.setAttribute("aria-label", "Restar una unidad de " + t.name);
+    mas.setAttribute("aria-label", "Sumar una unidad de " + t.name);
+    function actualizarCantidad(){
+      div.querySelector(".imp").textContent = fmt((parseFloat(m.peonadas[t.id])||0)*t.precio);
+      menos.disabled = !(parseFloat(m.peonadas[t.id]) > 0);
+      $("totPeonadas").textContent = fmt(eurosPeonadas(ymKey()));
+    }
+    uds.oninput = () => {
+      if (uds.value !== "" && (!Number.isFinite(uds.valueAsNumber) || uds.valueAsNumber < 0)) return;
+      m.peonadas[t.id] = uds.value;
+      saveState(); actualizarCantidad(); renderNomina();
     };
+    uds.onchange = () => { uds.value = m.peonadas[t.id] || ""; };
+    function paso(delta){
+      m.peonadas[t.id] = String(Math.max(0,(parseFloat(m.peonadas[t.id])||0)+delta));
+      uds.value = m.peonadas[t.id];
+      saveState(); actualizarCantidad(); renderNomina();
+    }
+    menos.onclick = () => paso(-1); mas.onclick = () => paso(1);
+    actualizarCantidad();
     mount.appendChild(div);
   });
   $("totPeonadas").textContent = fmt(eurosPeonadas(ymKey()));
@@ -643,7 +746,7 @@ $("importFile").onchange = e => {
 
 function renderAll(){
   $("mlabel").textContent = ymLabel(ymKey());
-  renderCal(); renderHoras(); renderTarifas();
+  renderCal(); renderHoras(); renderTarifas(); renderGuardiaEditors();
   renderPeonadas(); renderSalario(); renderNomina();
 }
 renderAll();
