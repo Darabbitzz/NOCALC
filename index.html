@@ -383,7 +383,7 @@ function dayType(ds){
 
 // ================= cálculo de horas =================
 // Guardia normal ('n'): entre semana 6h pres + 2h loc + 8h loc (madrugada, tipo del día siguiente)
-//                       sáb/festivo 14h pres + 2h loc + 8h loc (madrugada)
+//                       sáb/festivo 12h pres + 4h loc + 8h loc (madrugada)
 // Presencia 24h ('p'): mismos tramos, pero todo a tarifa de presencia
 function guardiaHoras(ds, tipo){
   const t = dayType(ds), tn = dayType(nextDay(ds));
@@ -394,8 +394,8 @@ function guardiaHoras(ds, tipo){
     H[loc + "Lab"] += 2;
     H[loc + tn]    += 8;
   } else {
-    H[pre + t]  += 14;
-    H[loc + t]  += 2;
+    H[pre + t]  += 12;
+    H[loc + t]  += 4;
     H[loc + tn] += 8;
   }
   return H;
