@@ -274,13 +274,19 @@
       <input id="nomOtros" type="number" inputmode="decimal" step="0.01" placeholder="0">
     </label>
     <div id="netoDesglose"></div>
+    <div class="meta" id="irpfAcumulado" style="margin-top:8px"></div>
     <div class="restante" style="border-top:1px solid var(--line);margin-top:8px;padding-top:10px">
       <span>Neto estimado</span><span class="v num" id="nomNeto">—</span>
     </div>
+    <label class="field" style="margin-top:12px">
+      <span class="lbl">IRPF retenido real de este mes € (opcional)</span>
+      <input id="nomIrpfReal" type="number" inputmode="decimal" step="0.01" placeholder="Usar cálculo ajustado">
+    </label>
+    <div class="meta"><span>Si lo rellenas, se aplicará al neto y servirá para regularizar los meses siguientes.</span></div>
     <details style="margin-top:8px">
       <summary class="meta" style="cursor:pointer"><span>Parámetros del cálculo</span></summary>
       <div class="row3" style="grid-template-columns:1fr 1fr;margin-top:10px">
-        <label class="field"><span class="lbl">Retención IRPF %</span><input id="netIrpf" type="number" inputmode="decimal" step="0.01"></label>
+        <label class="field"><span class="lbl">Objetivo anual IRPF %</span><input id="netIrpf" type="number" inputmode="decimal" step="0.01"></label>
         <label class="field"><span class="lbl">Reducción %</span><input id="netRed" type="number" inputmode="decimal" step="0.01"></label>
         <label class="field"><span class="lbl">Cotización SS %</span><input id="netSS" type="number" inputmode="decimal" step="0.01"></label>
         <label class="field"><span class="lbl">Base máxima SS €</span><input id="netTope" type="number" inputmode="decimal" step="0.01"></label>
@@ -437,7 +443,8 @@ function horasGuardia(ds, tipo, mes){
   return auto;
 }
 function horasMes(k){
-  const m = monthData(k);
+  const m = state.months[k] || { guardias:{}, peonadas:{} };
+  if (!m.guardias) m.guardias = {};
   const tot = { presLab:0, presSab:0, presFes:0, locLab:0, locSab:0, locFes:0 };
   Object.keys(m.guardias).forEach(ds => {
     const H = horasGuardia(ds, m.guardias[ds], m);
@@ -450,7 +457,8 @@ function eurosGuardias(k){
   return Object.keys(H).reduce((s,x)=>s + H[x]*(T[x]||0), 0);
 }
 function eurosPeonadas(k){
-  const m = monthData(k);
+  const m = state.months[k] || { peonadas:{} };
+  if (!m.peonadas) m.peonadas = {};
   return state.config.peonadaTipos.reduce((s,t)=>s + (parseFloat(m.peonadas[t.id])||0)*t.precio, 0);
 }
 function fijoMensual(){
@@ -460,10 +468,10 @@ function fijoMensual(){
   return t;
 }
 
-const pct = n => n.toLocaleString("es-ES") + " %";
+const pct = n => n.toLocaleString("es-ES",{maximumFractionDigits:2}) + " %";
 function otrosMes(){ return parseFloat(monthData().otros) || 0; }
-// Neto: bruto − reducción − Seguridad Social (cuota + solidaridad) − IRPF
-function calcNeto(salario, tarde, guardias, otros){
+// Parte común del neto, sin IRPF. Se reutiliza para reconstruir el acumulado anual.
+function calcBaseNeto(salario, tarde, guardias, otros){
   const P = Object.assign({}, DEFAULTS.config.neto, state.config.neto);
   const bruto = salario + tarde + guardias + otros;
   const reduccion = P.reduccion/100 * (salario + guardias);
@@ -478,9 +486,44 @@ function calcNeto(salario, tarde, guardias, otros){
                    + Math.max(0, Math.min(exceso, t2) - t1) * 0.0125
                    + Math.max(0, exceso - t2) * 0.0146;
   const solidaridad = solidTotal / 6;
-  const irpfImp = total * P.irpf/100;
-  const neto = total - cuota - solidaridad - irpfImp;
-  return { P, bruto, reduccion, total, prorrata, baseSS, cuota, exceso, solidaridad, irpfImp, neto };
+  return { P, bruto, reduccion, total, prorrata, baseSS, cuota, exceso, solidaridad };
+}
+function shiftYm(k, delta){
+  const [y,m] = k.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return ymKey(d.getFullYear(), d.getMonth());
+}
+function baseNetoMes(k){
+  const kVar = state.config.pagoMesSiguiente ? shiftYm(k, -1) : k;
+  const m = state.months[k] || {};
+  return calcBaseNeto(fijoMensual(), eurosPeonadas(kVar), eurosGuardias(kVar), parseFloat(m.otros)||0);
+}
+// Regularización acumulativa: en cada mes alcanza el objetivo anual sobre toda la
+// base registrada del año, descontando lo realmente retenido en meses anteriores.
+function irpfRegularizado(k, totalActual, P){
+  const [year, month] = k.split("-").map(Number);
+  let baseAcum = 0, retenidoPrevio = 0;
+  for (let i=1; i<=month; i++){
+    const mk = `${year}-${String(i).padStart(2,"0")}`;
+    const total = i === month ? totalActual : baseNetoMes(mk).total;
+    baseAcum += total;
+    const objetivoAcum = baseAcum * P.irpf/100;
+    const calculado = Math.max(0, objetivoAcum - retenidoPrevio);
+    if (i === month) return { baseAcum, retenidoPrevio, objetivoAcum, calculado };
+    const real = parseFloat(state.months[mk]?.irpfReal);
+    retenidoPrevio += isFinite(real) ? real : calculado;
+  }
+}
+// Neto: bruto − reducción − Seguridad Social (cuota + solidaridad) − IRPF ajustado.
+function calcNeto(salario, tarde, guardias, otros, k){
+  const B = calcBaseNeto(salario, tarde, guardias, otros);
+  const R = irpfRegularizado(k || ymKey(), B.total, B.P);
+  const real = parseFloat(state.months[k || ymKey()]?.irpfReal);
+  const usaIrpfReal = isFinite(real);
+  const irpfImp = usaIrpfReal ? real : R.calculado;
+  const tipoMes = B.total > 0 ? 100 * R.calculado / B.total : 0;
+  const neto = B.total - B.cuota - B.solidaridad - irpfImp;
+  return { ...B, ...R, irpfImp, usaIrpfReal, tipoMes, neto };
 }
 
 // ================= render: guardias =================
@@ -742,7 +785,7 @@ function renderNomina(){
   });
   $("nomEsperado").textContent = fmt(tot);
 
-  const N = calcNeto(fijoMensual(), p, g, otrosMes());
+  const N = calcNeto(fijoMensual(), p, g, otrosMes(), ymKey());
   const netMount = $("netoDesglose"); netMount.innerHTML = "";
   [
     ["Bruto", N.bruto],
@@ -750,15 +793,19 @@ function renderNomina(){
     ["Total (base IRPF)", N.total],
     [`Cuota SS ${pct(N.P.ss)} sobre ${fmt(N.baseSS)}`, -N.cuota],
     ...(N.solidaridad ? [[`Solidaridad (exceso ${fmt(N.exceso)})`, -N.solidaridad]] : []),
-    [`IRPF ${pct(N.P.irpf)}`, -N.irpfImp],
+    [N.usaIrpfReal
+      ? `IRPF real (cálculo ajustado: ${fmt(N.calculado)})`
+      : `IRPF ajustado ${pct(N.tipoMes)} (objetivo ${pct(N.P.irpf)})`, -N.irpfImp],
   ].forEach(([n,v])=>{
     const div = document.createElement("div");
     div.className = "mov";
     div.innerHTML = `<span class="a">${n}</span><span class="num" style="min-width:96px;text-align:right">${fmt(v)}</span>`;
     netMount.appendChild(div);
   });
+  $("irpfAcumulado").textContent = `Año: base IRPF acumulada ${fmt(N.baseAcum)} · retenido antes ${fmt(N.retenidoPrevio)} · objetivo acumulado ${fmt(N.objetivoAcum)}`;
   $("nomNeto").textContent = fmt(N.neto);
   if (document.activeElement !== $("nomOtros")) $("nomOtros").value = monthData().otros || "";
+  if (document.activeElement !== $("nomIrpfReal")) $("nomIrpfReal").value = monthData().irpfReal ?? "";
   const P = c.neto;
   [["netIrpf","irpf"],["netRed","reduccion"],["netSS","ss"],["netTope","topeBase"],["netProrr","prorrata"]].forEach(([id,k])=>{
     if (document.activeElement !== $(id)) $(id).value = P[k] ?? "";
@@ -776,6 +823,7 @@ function renderNomina(){
 }
 $("nomReal").oninput = ()=>{ monthData().nomReal = $("nomReal").value; saveState(); renderNomina(); };
 $("nomOtros").oninput = ()=>{ monthData().otros = $("nomOtros").value; saveState(); renderNomina(); };
+$("nomIrpfReal").oninput = ()=>{ monthData().irpfReal = $("nomIrpfReal").value; saveState(); renderNomina(); };
 [["netIrpf","irpf"],["netRed","reduccion"],["netSS","ss"],["netTope","topeBase"],["netProrr","prorrata"]].forEach(([id,k])=>{
   $(id).onchange = ()=>{
     const raw = $(id).value.trim(), v = parseFloat(raw.replace(",","."));
