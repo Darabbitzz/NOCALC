@@ -285,8 +285,20 @@
     <div class="meta"><span>Si lo rellenas, se aplicará al neto y servirá para regularizar los meses siguientes.</span></div>
     <details style="margin-top:8px">
       <summary class="meta" style="cursor:pointer"><span>Parámetros del cálculo</span></summary>
+      <label class="field" style="margin-top:10px">
+        <span class="lbl">Cálculo del IRPF</span>
+        <select id="netModo"><option value="auto">Automático, como la nómina</option><option value="fijo">% fijo (objetivo)</option></select>
+      </label>
+      <div class="meta"><span>Automático: previsión anual con los meses que tienes, escala de retenciones y mínimo personal, sin hijos ni otros datos familiares.</span></div>
+      <span class="lbl" style="display:block;margin-top:12px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--slate)">Acumulados de tu última nómina (opcional)</span>
+      <label class="field" style="margin-top:6px"><span class="lbl">Hasta el mes (1-11)</span><input id="acHasta" type="number" inputmode="numeric" min="1" max="11" step="1" placeholder="p. ej. 8 = agosto"></label>
       <div class="row3" style="grid-template-columns:1fr 1fr;margin-top:10px">
-        <label class="field"><span class="lbl">Objetivo anual IRPF %</span><input id="netIrpf" type="number" inputmode="decimal" step="0.01"></label>
+        <label class="field"><span class="lbl">Base IRPF acum. €</span><input id="acBase" type="number" inputmode="decimal" step="0.01"></label>
+        <label class="field"><span class="lbl">IRPF retenido acum. €</span><input id="acRet" type="number" inputmode="decimal" step="0.01"></label>
+      </div>
+      <div class="meta"><span>Las nóminas suelen traer estos acumulados del año. Si no los pones, los meses sin datos se estiman con la media de los que tienes.</span></div>
+      <div class="row3" style="grid-template-columns:1fr 1fr;margin-top:10px">
+        <label class="field"><span class="lbl">IRPF % (modo fijo)</span><input id="netIrpf" type="number" inputmode="decimal" step="0.01"></label>
         <label class="field"><span class="lbl">Reducción %</span><input id="netRed" type="number" inputmode="decimal" step="0.01"></label>
         <label class="field"><span class="lbl">Cotización SS %</span><input id="netSS" type="number" inputmode="decimal" step="0.01"></label>
         <label class="field"><span class="lbl">Base máxima SS €</span><input id="netTope" type="number" inputmode="decimal" step="0.01"></label>
@@ -371,7 +383,7 @@ const DEFAULTS = {
       { id:"tac",  name:"TAC",             precio:0 },
     ],
     pagoMesSiguiente: true,
-    neto: { irpf:33, reduccion:5, ss:6.5, topeBase:5101.20, prorrata:null },
+    neto: { irpfModo:"auto", irpf:33, reduccion:5, ss:6.5, topeBase:5101.20, prorrata:null, acumulado:null },
   },
   festivos: {},   // "2026-08-15": true
   months: {},     // "2026-07": { guardias:{"2026-07-14":"n"|"p"}, peonadas:{tipoId:n}, nomReal:"" }
@@ -498,8 +510,62 @@ function baseNetoMes(k){
   const m = state.months[k] || {};
   return calcBaseNeto(fijoMensual(), eurosPeonadas(kVar), eurosGuardias(kVar), parseFloat(m.otros)||0);
 }
-// Regularización acumulativa: en cada mes alcanza el objetivo anual sobre toda la
-// base registrada del año, descontando lo realmente retenido en meses anteriores.
+// ---- IRPF automático, como la nómina (art. 85-87 RIRPF, sin datos familiares) ----
+// Escala de retenciones única estatal y mínimo personal; se recalcula cada mes con la
+// previsión anual y se regulariza descontando lo ya retenido.
+const ESCALA_RET = [[12450,19],[20200,24],[35200,30],[60000,37],[300000,45],[Infinity,47]];
+const MIN_PERSONAL = 5550, OTROS_GASTOS = 2000, PAGAS_EXTRA = [6,12];
+function cuotaEscala(base){
+  let c = 0, prev = 0;
+  for (const [lim, t] of ESCALA_RET){
+    if (base <= prev) break;
+    c += (Math.min(base, lim) - prev) * t/100; prev = lim;
+  }
+  return c;
+}
+function cuotaAnualIrpf(retrib, ss){
+  const base = Math.max(0, retrib - ss - OTROS_GASTOS);
+  return Math.max(0, cuotaEscala(base) - cuotaEscala(Math.min(MIN_PERSONAL, base)));
+}
+function mesConDatos(mk){
+  const m = state.months[mk];
+  const kVar = state.config.pagoMesSiguiente ? shiftYm(mk, -1) : mk;
+  if (m && (m.nomReal || parseFloat(m.otros) || isFinite(parseFloat(m.irpfReal)))) return true;
+  return eurosGuardias(kVar) + eurosPeonadas(kVar) > 0;
+}
+function irpfAutomatico(k, actual, P){
+  const [year, month] = k.split("-").map(Number);
+  const mk = i => `${year}-${String(i).padStart(2,"0")}`;
+  // media de los meses registrados (incluido el actual) para extrapolar los que faltan
+  const reg = [actual];
+  for (let i=1; i<month; i++) if (mesConDatos(mk(i))) reg.push(baseNetoMes(mk(i)));
+  const avgTot = reg.reduce((s,b)=>s+b.total,0) / reg.length;
+  const avgSS  = reg.reduce((s,b)=>s+b.cuota+b.solidaridad,0) / reg.length;
+  const extra = actual.prorrata * 6;
+  const ac = P.acumulado && P.acumulado.year === year && P.acumulado.hasta < month ? P.acumulado : null;
+  let acumR = ac ? +ac.base||0 : 0, acumRet = ac ? +ac.retenido||0 : 0, acumSS = ac ? avgSS*ac.hasta : 0;
+  let estimados = 0;
+  for (let i = ac ? ac.hasta+1 : 1; i<=month; i++){
+    const datos = i === month || mesConDatos(mk(i));
+    if (!datos) estimados++;
+    const b = i === month ? actual : (datos ? baseNetoMes(mk(i)) : null);
+    const tot = b ? b.total : avgTot, ss = b ? b.cuota + b.solidaridad : avgSS;
+    const quedan = 12 - i;
+    const extrasPend = PAGAS_EXTRA.filter(x => x >= i).length * extra;
+    const prevAnual = acumR + tot + avgTot*quedan + extrasPend;
+    const cuota = cuotaAnualIrpf(prevAnual, acumSS + ss + avgSS*quedan);
+    const pendiente = tot + avgTot*quedan + extrasPend;
+    const tipo = pendiente > 0 ? Math.max(0, (cuota - acumRet) / pendiente) : 0;
+    const calculado = tot * tipo;
+    if (i === month) return { baseAcum: acumR + tot, retenidoPrevio: acumRet, prevAnual, cuotaAnual: cuota,
+                              tipoAnual: prevAnual ? 100*cuota/prevAnual : 0, calculado, estimados, conAcumulado: !!ac };
+    const real = parseFloat(state.months[mk(i)]?.irpfReal);
+    acumRet += isFinite(real) ? real : calculado;
+    acumR += tot; acumSS += ss;
+    if (PAGAS_EXTRA.includes(i)) { acumR += extra; acumRet += extra * tipo; }
+  }
+}
+// Modo % fijo: alcanza el objetivo sobre la base registrada del año, descontando lo retenido.
 function irpfRegularizado(k, totalActual, P){
   const [year, month] = k.split("-").map(Number);
   let baseAcum = 0, retenidoPrevio = 0;
@@ -517,7 +583,8 @@ function irpfRegularizado(k, totalActual, P){
 // Neto: bruto − reducción − Seguridad Social (cuota + solidaridad) − IRPF ajustado.
 function calcNeto(salario, tarde, guardias, otros, k){
   const B = calcBaseNeto(salario, tarde, guardias, otros);
-  const R = irpfRegularizado(k || ymKey(), B.total, B.P);
+  const R = B.P.irpfModo === "fijo" ? irpfRegularizado(k || ymKey(), B.total, B.P)
+                                    : irpfAutomatico(k || ymKey(), B, B.P);
   const real = parseFloat(state.months[k || ymKey()]?.irpfReal);
   const usaIrpfReal = isFinite(real);
   const irpfImp = usaIrpfReal ? real : R.calculado;
@@ -795,14 +862,25 @@ function renderNomina(){
     ...(N.solidaridad ? [[`Solidaridad (exceso ${fmt(N.exceso)})`, -N.solidaridad]] : []),
     [N.usaIrpfReal
       ? `IRPF real (cálculo ajustado: ${fmt(N.calculado)})`
-      : `IRPF ajustado ${pct(N.tipoMes)} (objetivo ${pct(N.P.irpf)})`, -N.irpfImp],
+      : N.P.irpfModo === "fijo"
+        ? `IRPF ajustado ${pct(N.tipoMes)} (objetivo ${pct(N.P.irpf)})`
+        : `IRPF ${pct(N.tipoMes)} este mes`, -N.irpfImp],
   ].forEach(([n,v])=>{
     const div = document.createElement("div");
     div.className = "mov";
     div.innerHTML = `<span class="a">${n}</span><span class="num" style="min-width:96px;text-align:right">${fmt(v)}</span>`;
     netMount.appendChild(div);
   });
-  $("irpfAcumulado").textContent = `Año: base IRPF acumulada ${fmt(N.baseAcum)} · retenido antes ${fmt(N.retenidoPrevio)} · objetivo acumulado ${fmt(N.objetivoAcum)}`;
+  $("irpfAcumulado").textContent = N.P.irpfModo === "fijo"
+    ? `Año: base IRPF acumulada ${fmt(N.baseAcum)} · retenido antes ${fmt(N.retenidoPrevio)} · objetivo acumulado ${fmt(N.objetivoAcum)}`
+    : `Previsión anual ${fmt(N.prevAnual)} · tipo anual ${pct(N.tipoAnual)} · retenido antes ${fmt(N.retenidoPrevio)}`
+      + (N.conAcumulado ? " · con acumulados de nómina" : "")
+      + (N.estimados ? ` · ${N.estimados} ${N.estimados===1?"mes estimado":"meses estimados"} con la media` : "");
+  if (document.activeElement !== $("netModo")) $("netModo").value = N.P.irpfModo;
+  const ac = c.neto.acumulado && c.neto.acumulado.year === curY ? c.neto.acumulado : {};
+  [["acHasta","hasta"],["acBase","base"],["acRet","retenido"]].forEach(([id,k])=>{
+    if (document.activeElement !== $(id)) $(id).value = ac[k] ?? "";
+  });
   $("nomNeto").textContent = fmt(N.neto);
   if (document.activeElement !== $("nomOtros")) $("nomOtros").value = monthData().otros || "";
   if (document.activeElement !== $("nomIrpfReal")) $("nomIrpfReal").value = monthData().irpfReal ?? "";
@@ -829,6 +907,17 @@ $("nomIrpfReal").oninput = ()=>{ monthData().irpfReal = $("nomIrpfReal").value; 
     const raw = $(id).value.trim(), v = parseFloat(raw.replace(",","."));
     if (k === "prorrata" && raw === "") state.config.neto.prorrata = null;
     else if (isFinite(v)) state.config.neto[k] = v;
+    saveState(); renderNomina();
+  };
+});
+$("netModo").onchange = ()=>{ state.config.neto.irpfModo = $("netModo").value; saveState(); renderNomina(); };
+["acHasta","acBase","acRet"].forEach(id=>{
+  $(id).onchange = ()=>{
+    const num = x => parseFloat(String($(x).value).replace(",","."));
+    const hasta = Math.round(num("acHasta"));
+    state.config.neto.acumulado = (hasta >= 1 && hasta <= 11)
+      ? { year: curY, hasta, base: num("acBase") || 0, retenido: num("acRet") || 0 }
+      : null;
     saveState(); renderNomina();
   };
 });
