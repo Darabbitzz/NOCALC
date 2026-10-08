@@ -351,6 +351,8 @@ function normalize(s){
   for (const k of Object.keys(D.config)) if (!(k in s.config)) s.config[k] = JSON.parse(JSON.stringify(D.config[k]));
   if (!s.festivos) s.festivos = {};
   if (!s.months) s.months = {};
+  // v8: el tipo de la última nómina pasa a ser el modo por defecto del IRPF (una sola vez)
+  if (s.config.neto && !s.config.neto.v8){ s.config.neto.irpfModo = "nomina"; s.config.neto.v8 = true; }
   return s;
 }
 
