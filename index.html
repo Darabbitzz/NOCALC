@@ -263,7 +263,7 @@
   <div class="card">
     <div id="nomDesglose"></div>
     <div class="restante" style="border-top:1px solid var(--line);margin-top:8px;padding-top:10px">
-      <span>Bruto esperado</span><span class="v num" id="nomEsperado">—</span>
+      <span>Base IRPF esperada</span><span class="v num" id="nomEsperado">—</span>
     </div>
   </div>
 
@@ -287,9 +287,10 @@
       <summary class="meta" style="cursor:pointer"><span>Parámetros del cálculo</span></summary>
       <label class="field" style="margin-top:10px">
         <span class="lbl">Cálculo del IRPF</span>
-        <select id="netModo"><option value="auto">Automático, como la nómina</option><option value="fijo">% fijo (objetivo)</option></select>
+        <select id="netModo"><option value="nomina">Tipo de mi última nómina</option><option value="auto">Estimación anual automática</option><option value="fijo">% objetivo con regularización</option></select>
       </label>
-      <div class="meta"><span>Automático: previsión anual con los meses que tienes, escala de retenciones y mínimo personal, sin hijos ni otros datos familiares.</span></div>
+      <label class="field" style="margin-top:10px"><span class="lbl">Tipo IRPF de la última nómina %</span><input id="netTipoNom" type="number" inputmode="decimal" step="0.01"></label>
+      <div class="meta"><span>La opción más fiable: el hospital recalcula el tipo cada mes y lo imprime en la nómina (Ret.IRPF xx %). Estimación automática: previsión anual con los meses que tienes, escala de retenciones y mínimo personal, sin hijos ni otros datos familiares.</span></div>
       <span class="lbl" style="display:block;margin-top:12px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--slate)">Acumulados de tu última nómina (opcional)</span>
       <label class="field" style="margin-top:6px"><span class="lbl">Hasta el mes (1-11)</span><input id="acHasta" type="number" inputmode="numeric" min="1" max="11" step="1" placeholder="p. ej. 8 = agosto"></label>
       <div class="row3" style="grid-template-columns:1fr 1fr;margin-top:10px">
@@ -313,7 +314,7 @@
   <div class="card">
     <label class="chk"><input type="checkbox" id="pagoSig"> Guardias y peonadas se cobran al mes siguiente</label>
     <label class="field" style="margin-top:12px">
-      <span class="lbl">Nómina bruta real de este mes €</span>
+      <span class="lbl">B. IRPF real de la nómina de este mes €</span>
       <input id="nomReal" type="number" inputmode="decimal" step="0.01" placeholder="—">
     </label>
     <div class="restante" style="margin-top:10px">
@@ -383,7 +384,7 @@ const DEFAULTS = {
       { id:"tac",  name:"TAC",             precio:0 },
     ],
     pagoMesSiguiente: true,
-    neto: { irpfModo:"auto", irpf:33, reduccion:5, ss:6.5, topeBase:5101.20, prorrata:null, acumulado:null },
+    neto: { irpfModo:"nomina", tipoNomina:33, irpf:33, reduccion:5, ss:6.5, topeBase:5101.20, prorrata:null, acumulado:null },
   },
   festivos: {},   // "2026-08-15": true
   months: {},     // "2026-07": { guardias:{"2026-07-14":"n"|"p"}, peonadas:{tipoId:n}, nomReal:"" }
@@ -483,22 +484,26 @@ function fijoMensual(){
 const pct = n => n.toLocaleString("es-ES",{maximumFractionDigits:2}) + " %";
 function otrosMes(){ return parseFloat(monthData().otros) || 0; }
 // Parte común del neto, sin IRPF. Se reutiliza para reconstruir el acumulado anual.
+// Salario y tarifas de guardia se guardan ya reducidos (tabla del convenio); la nómina
+// los muestra en bruto (÷ 0,95) y resta la «Reducció DL 3/2010» sobre salario + guardias.
+const SOLID_TRAB = [0.19, 0.21, 0.24]; // % del trabajador en cada tramo de la cotización de solidaridad
 function calcBaseNeto(salario, tarde, guardias, otros){
   const P = Object.assign({}, DEFAULTS.config.neto, state.config.neto);
-  const bruto = salario + tarde + guardias + otros;
-  const reduccion = P.reduccion/100 * (salario + guardias);
+  const r = P.reduccion/100;
+  const salarioBruto = salario / (1 - r), guardiasBruto = guardias / (1 - r);
+  const reduccion = (salarioBruto + guardiasBruto) * r;
+  const bruto = salarioBruto + guardiasBruto + tarde + otros;
   const total = bruto - reduccion;
   const prorrata = P.prorrata ?? (2 * (parseFloat(state.config.salarioBase)||0) / 12);
   const baseSS = Math.min(total + prorrata, P.topeBase);
   const cuota = baseSS * P.ss/100;
   const exceso = Math.max(0, total + prorrata - P.topeBase);
-  // cotización de solidaridad: tramos sobre el exceso (10 % y 50 % de la base máxima); el trabajador paga 1/6
+  // cotización de solidaridad: tramos sobre el exceso (10 % y 50 % de la base máxima)
   const t1 = P.topeBase * 0.10, t2 = P.topeBase * 0.50;
-  const solidTotal = Math.min(exceso, t1) * 0.0115
-                   + Math.max(0, Math.min(exceso, t2) - t1) * 0.0125
-                   + Math.max(0, exceso - t2) * 0.0146;
-  const solidaridad = solidTotal / 6;
-  return { P, bruto, reduccion, total, prorrata, baseSS, cuota, exceso, solidaridad };
+  const solidaridad = (Math.min(exceso, t1) * SOLID_TRAB[0]
+                    + Math.max(0, Math.min(exceso, t2) - t1) * SOLID_TRAB[1]
+                    + Math.max(0, exceso - t2) * SOLID_TRAB[2]) / 100;
+  return { P, salarioBruto, guardiasBruto, bruto, reduccion, total, prorrata, baseSS, cuota, exceso, solidaridad };
 }
 function shiftYm(k, delta){
   const [y,m] = k.split("-").map(Number);
@@ -584,7 +589,8 @@ function irpfRegularizado(k, totalActual, P){
 function calcNeto(salario, tarde, guardias, otros, k){
   const B = calcBaseNeto(salario, tarde, guardias, otros);
   const R = B.P.irpfModo === "fijo" ? irpfRegularizado(k || ymKey(), B.total, B.P)
-                                    : irpfAutomatico(k || ymKey(), B, B.P);
+          : B.P.irpfModo === "nomina" ? { calculado: B.total * B.P.tipoNomina/100 }
+          : irpfAutomatico(k || ymKey(), B, B.P);
   const real = parseFloat(state.months[k || ymKey()]?.irpfReal);
   const usaIrpfReal = isFinite(real);
   const irpfImp = usaIrpfReal ? real : R.calculado;
@@ -855,23 +861,29 @@ function renderNomina(){
   const N = calcNeto(fijoMensual(), p, g, otrosMes(), ymKey());
   const netMount = $("netoDesglose"); netMount.innerHTML = "";
   [
-    ["Bruto", N.bruto],
-    [`Reducción ${pct(N.P.reduccion)} (salario + guardias)`, -N.reduccion],
-    ["Total (base IRPF)", N.total],
+    ["Salari (como en la nómina)", N.salarioBruto],
+    ["Guardias (como en la nómina)", N.guardiasBruto],
+    ...(p ? [["Activitats torn tarda", p]] : []),
+    ...(otrosMes() ? [["Otros", otrosMes()]] : []),
+    [`Reducció DL 3/2010 (${pct(N.P.reduccion)})`, -N.reduccion],
+    ["Base IRPF (BC teòrica)", N.total],
     [`Cuota SS ${pct(N.P.ss)} sobre ${fmt(N.baseSS)}`, -N.cuota],
     ...(N.solidaridad ? [[`Solidaridad (exceso ${fmt(N.exceso)})`, -N.solidaridad]] : []),
     [N.usaIrpfReal
       ? `IRPF real (cálculo ajustado: ${fmt(N.calculado)})`
       : N.P.irpfModo === "fijo"
         ? `IRPF ajustado ${pct(N.tipoMes)} (objetivo ${pct(N.P.irpf)})`
-        : `IRPF ${pct(N.tipoMes)} este mes`, -N.irpfImp],
+        : N.P.irpfModo === "nomina"
+          ? `IRPF ${pct(N.P.tipoNomina)} (tipo de la última nómina)`
+          : `IRPF ${pct(N.tipoMes)} este mes (estimado)`, -N.irpfImp],
   ].forEach(([n,v])=>{
     const div = document.createElement("div");
     div.className = "mov";
     div.innerHTML = `<span class="a">${n}</span><span class="num" style="min-width:96px;text-align:right">${fmt(v)}</span>`;
     netMount.appendChild(div);
   });
-  $("irpfAcumulado").textContent = N.P.irpfModo === "fijo"
+  $("irpfAcumulado").textContent = N.P.irpfModo === "nomina" ? ""
+    : N.P.irpfModo === "fijo"
     ? `Año: base IRPF acumulada ${fmt(N.baseAcum)} · retenido antes ${fmt(N.retenidoPrevio)} · objetivo acumulado ${fmt(N.objetivoAcum)}`
     : `Previsión anual ${fmt(N.prevAnual)} · tipo anual ${pct(N.tipoAnual)} · retenido antes ${fmt(N.retenidoPrevio)}`
       + (N.conAcumulado ? " · con acumulados de nómina" : "")
@@ -885,7 +897,7 @@ function renderNomina(){
   if (document.activeElement !== $("nomOtros")) $("nomOtros").value = monthData().otros || "";
   if (document.activeElement !== $("nomIrpfReal")) $("nomIrpfReal").value = monthData().irpfReal ?? "";
   const P = c.neto;
-  [["netIrpf","irpf"],["netRed","reduccion"],["netSS","ss"],["netTope","topeBase"],["netProrr","prorrata"]].forEach(([id,k])=>{
+  [["netTipoNom","tipoNomina"],["netIrpf","irpf"],["netRed","reduccion"],["netSS","ss"],["netTope","topeBase"],["netProrr","prorrata"]].forEach(([id,k])=>{
     if (document.activeElement !== $(id)) $(id).value = P[k] ?? "";
   });
 
@@ -902,7 +914,7 @@ function renderNomina(){
 $("nomReal").oninput = ()=>{ monthData().nomReal = $("nomReal").value; saveState(); renderNomina(); };
 $("nomOtros").oninput = ()=>{ monthData().otros = $("nomOtros").value; saveState(); renderNomina(); };
 $("nomIrpfReal").oninput = ()=>{ monthData().irpfReal = $("nomIrpfReal").value; saveState(); renderNomina(); };
-[["netIrpf","irpf"],["netRed","reduccion"],["netSS","ss"],["netTope","topeBase"],["netProrr","prorrata"]].forEach(([id,k])=>{
+[["netTipoNom","tipoNomina"],["netIrpf","irpf"],["netRed","reduccion"],["netSS","ss"],["netTope","topeBase"],["netProrr","prorrata"]].forEach(([id,k])=>{
   $(id).onchange = ()=>{
     const raw = $(id).value.trim(), v = parseFloat(raw.replace(",","."));
     if (k === "prorrata" && raw === "") state.config.neto.prorrata = null;
