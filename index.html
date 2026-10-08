@@ -968,6 +968,20 @@ $("importFile").onchange = e => {
   r.onload = () => {
     try {
       const data = JSON.parse(r.result);
+      // Archivo de nóminas reales: se fusiona sin tocar guardias, peonadas ni ajustes.
+      if (data.tipo === "nominas" && Array.isArray(data.nominas)){
+        data.nominas.forEach(n => {
+          const m = monthData(n.mes);
+          if (isFinite(n.baseIrpf)) m.nomReal = String(n.baseIrpf);
+          if (isFinite(n.irpf)) m.irpfReal = String(n.irpf);
+          m.nominaReal = n;
+        });
+        const ult = data.nominas.filter(n => isFinite(n.tipoIrpf) && n.tipoIrpf > 0).sort((a,b)=>a.mes<b.mes?-1:1).pop();
+        if (ult) state.config.neto.tipoNomina = ult.tipoIrpf;
+        if (data.acumulado) state.config.neto.acumulado = data.acumulado;
+        saveState(); renderAll(); toast(`${data.nominas.length} nóminas importadas`);
+        return;
+      }
       if (!data.config || !data.months) throw new Error("formato");
       state = normalize(data); saveState(); renderAll(); toast("Copia importada");
     } catch(err){ toast("Archivo no válido"); }
