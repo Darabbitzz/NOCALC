@@ -273,6 +273,10 @@
       <span class="lbl">Otros conceptos de este mes €</span>
       <input id="nomOtros" type="number" inputmode="decimal" step="0.01" placeholder="0">
     </label>
+    <label class="field" style="margin-bottom:10px">
+      <span class="lbl">Paga extra de este mes € (automática en junio y diciembre)</span>
+      <input id="nomPagaExtra" type="number" inputmode="decimal" step="0.01" placeholder="0">
+    </label>
     <div id="netoDesglose"></div>
     <div class="meta" id="irpfAcumulado" style="margin-top:8px"></div>
     <div class="restante" style="border-top:1px solid var(--line);margin-top:8px;padding-top:10px">
@@ -485,27 +489,39 @@ function fijoMensual(){
 
 const pct = n => n.toLocaleString("es-ES",{maximumFractionDigits:2}) + " %";
 function otrosMes(){ return parseFloat(monthData().otros) || 0; }
+function pagaExtraMes(k){
+  const m = state.months[k] || {};
+  if (m.pagaExtra !== undefined && m.pagaExtra !== "") return parseFloat(m.pagaExtra) || 0;
+  const month = Number(k.split("-")[1]);
+  if (![6,12].includes(month)) return 0;
+  const P = Object.assign({}, DEFAULTS.config.neto, state.config.neto);
+  const prorrata = P.prorrata ?? (2 * (parseFloat(state.config.salarioBase)||0) / 12);
+  return prorrata * 6;
+}
 // Parte común del neto, sin IRPF. Se reutiliza para reconstruir el acumulado anual.
 // Salario y tarifas de guardia se guardan ya reducidos (tabla del convenio); la nómina
 // los muestra en bruto (÷ 0,95) y resta la «Reducció DL 3/2010» sobre salario + guardias.
 const SOLID_TRAB = [0.19, 0.21, 0.24]; // % del trabajador en cada tramo de la cotización de solidaridad
-function calcBaseNeto(salario, tarde, guardias, otros){
+function calcBaseNeto(salario, tarde, guardias, otros, pagaExtra=0){
   const P = Object.assign({}, DEFAULTS.config.neto, state.config.neto);
   const r = P.reduccion/100;
   const salarioBruto = salario / (1 - r), guardiasBruto = guardias / (1 - r);
   const reduccion = (salarioBruto + guardiasBruto) * r;
-  const bruto = salarioBruto + guardiasBruto + tarde + otros;
+  const bruto = salarioBruto + guardiasBruto + tarde + otros + pagaExtra;
   const total = bruto - reduccion;
   const prorrata = P.prorrata ?? (2 * (parseFloat(state.config.salarioBase)||0) / 12);
-  const baseSS = Math.min(total + prorrata, P.topeBase);
+  // La paga extra tributa por IRPF, pero no vuelve a cotizar al cobrarla:
+  // la Seguridad Social ya la ha incluido mediante la prorrata mensual.
+  const baseCotizable = total - pagaExtra + prorrata;
+  const baseSS = Math.min(baseCotizable, P.topeBase);
   const cuota = baseSS * P.ss/100;
-  const exceso = Math.max(0, total + prorrata - P.topeBase);
+  const exceso = Math.max(0, baseCotizable - P.topeBase);
   // cotización de solidaridad: tramos sobre el exceso (10 % y 50 % de la base máxima)
   const t1 = P.topeBase * 0.10, t2 = P.topeBase * 0.50;
   const solidaridad = (Math.min(exceso, t1) * SOLID_TRAB[0]
                     + Math.max(0, Math.min(exceso, t2) - t1) * SOLID_TRAB[1]
                     + Math.max(0, exceso - t2) * SOLID_TRAB[2]) / 100;
-  return { P, salarioBruto, guardiasBruto, bruto, reduccion, total, prorrata, baseSS, cuota, exceso, solidaridad };
+  return { P, salarioBruto, guardiasBruto, bruto, reduccion, total, pagaExtra, prorrata, baseSS, cuota, exceso, solidaridad };
 }
 function shiftYm(k, delta){
   const [y,m] = k.split("-").map(Number);
@@ -515,7 +531,7 @@ function shiftYm(k, delta){
 function baseNetoMes(k){
   const kVar = state.config.pagoMesSiguiente ? shiftYm(k, -1) : k;
   const m = state.months[k] || {};
-  return calcBaseNeto(fijoMensual(), eurosPeonadas(kVar), eurosGuardias(kVar), parseFloat(m.otros)||0);
+  return calcBaseNeto(fijoMensual(), eurosPeonadas(kVar), eurosGuardias(kVar), parseFloat(m.otros)||0, pagaExtraMes(k));
 }
 // ---- IRPF automático, como la nómina (art. 85-87 RIRPF, sin datos familiares) ----
 // Escala de retenciones única estatal y mínimo personal; se recalcula cada mes con la
@@ -546,7 +562,8 @@ function irpfAutomatico(k, actual, P){
   // media de los meses registrados (incluido el actual) para extrapolar los que faltan
   const reg = [actual];
   for (let i=1; i<month; i++) if (mesConDatos(mk(i))) reg.push(baseNetoMes(mk(i)));
-  const avgTot = reg.reduce((s,b)=>s+b.total,0) / reg.length;
+  // La media mensual excluye pagas extra para no proyectarlas dos veces.
+  const avgTot = reg.reduce((s,b)=>s+b.total-b.pagaExtra,0) / reg.length;
   const avgSS  = reg.reduce((s,b)=>s+b.cuota+b.solidaridad,0) / reg.length;
   const extra = actual.prorrata * 6;
   const ac = P.acumulado && P.acumulado.year === year && P.acumulado.hasta < month ? P.acumulado : null;
@@ -558,7 +575,7 @@ function irpfAutomatico(k, actual, P){
     const b = i === month ? actual : (datos ? baseNetoMes(mk(i)) : null);
     const tot = b ? b.total : avgTot, ss = b ? b.cuota + b.solidaridad : avgSS;
     const quedan = 12 - i;
-    const extrasPend = PAGAS_EXTRA.filter(x => x >= i).length * extra;
+    const extrasPend = PAGAS_EXTRA.filter(x => x > i).length * extra;
     const prevAnual = acumR + tot + avgTot*quedan + extrasPend;
     const cuota = cuotaAnualIrpf(prevAnual, acumSS + ss + avgSS*quedan);
     const pendiente = tot + avgTot*quedan + extrasPend;
@@ -569,7 +586,6 @@ function irpfAutomatico(k, actual, P){
     const real = parseFloat(state.months[mk(i)]?.irpfReal);
     acumRet += isFinite(real) ? real : calculado;
     acumR += tot; acumSS += ss;
-    if (PAGAS_EXTRA.includes(i)) { acumR += extra; acumRet += extra * tipo; }
   }
 }
 // Modo % fijo: alcanza el objetivo sobre la base registrada del año, descontando lo retenido.
@@ -588,8 +604,8 @@ function irpfRegularizado(k, totalActual, P){
   }
 }
 // Neto: bruto − reducción − Seguridad Social (cuota + solidaridad) − IRPF ajustado.
-function calcNeto(salario, tarde, guardias, otros, k){
-  const B = calcBaseNeto(salario, tarde, guardias, otros);
+function calcNeto(salario, tarde, guardias, otros, pagaExtra, k){
+  const B = calcBaseNeto(salario, tarde, guardias, otros, pagaExtra);
   const R = B.P.irpfModo === "fijo" ? irpfRegularizado(k || ymKey(), B.total, B.P)
           : B.P.irpfModo === "nomina" ? { calculado: B.total * B.P.tipoNomina/100 }
           : irpfAutomatico(k || ymKey(), B, B.P);
@@ -841,12 +857,14 @@ function renderNomina(){
   $("pagoSig").checked = !!c.pagoMesSiguiente;
   const kVar = c.pagoMesSiguiente ? prevYm() : ymKey();
   const g = eurosGuardias(kVar), p = eurosPeonadas(kVar);
+  const pagaExtra = pagaExtraMes(ymKey());
   const lines = [
     ["Salario base", parseFloat(c.salarioBase)||0],
     ...(c.dedicacionOn ? [["Plus dedicación", parseFloat(c.plusDedicacion)||0]] : []),
     ...c.pluses.filter(x=>x.on).map(x=>[x.name + (x.periodo==="anual"?" (1/12)":""), x.periodo==="anual"?x.importe/12:x.importe]),
     [`Guardias de ${ymLabel(kVar)}`, g],
     [`Peonadas de ${ymLabel(kVar)}`, p],
+    ...(pagaExtra ? [[`Paga extra ${MESES[curM]}`, pagaExtra]] : []),
     ...(otrosMes() ? [["Otros", otrosMes()]] : []),
   ];
   const mount = $("nomDesglose"); mount.innerHTML = "";
@@ -860,12 +878,13 @@ function renderNomina(){
   });
   $("nomEsperado").textContent = fmt(tot);
 
-  const N = calcNeto(fijoMensual(), p, g, otrosMes(), ymKey());
+  const N = calcNeto(fijoMensual(), p, g, otrosMes(), pagaExtra, ymKey());
   const netMount = $("netoDesglose"); netMount.innerHTML = "";
   [
     ["Salari (como en la nómina)", N.salarioBruto],
     ["Guardias (como en la nómina)", N.guardiasBruto],
     ...(p ? [["Activitats torn tarda", p]] : []),
+    ...(N.pagaExtra ? [[`Paga extra ${MESES[curM]}`, N.pagaExtra]] : []),
     ...(otrosMes() ? [["Otros", otrosMes()]] : []),
     [`Reducció DL 3/2010 (${pct(N.P.reduccion)})`, -N.reduccion],
     ["Base IRPF (BC teòrica)", N.total],
@@ -897,6 +916,11 @@ function renderNomina(){
   });
   $("nomNeto").textContent = fmt(N.neto);
   if (document.activeElement !== $("nomOtros")) $("nomOtros").value = monthData().otros || "";
+  if (document.activeElement !== $("nomPagaExtra")) {
+    const raw = monthData().pagaExtra;
+    $("nomPagaExtra").value = raw ?? "";
+    $("nomPagaExtra").placeholder = pagaExtra ? `Automática: ${fmt(pagaExtra)}` : "0";
+  }
   if (document.activeElement !== $("nomIrpfReal")) $("nomIrpfReal").value = monthData().irpfReal ?? "";
   const P = c.neto;
   [["netTipoNom","tipoNomina"],["netIrpf","irpf"],["netRed","reduccion"],["netSS","ss"],["netTope","topeBase"],["netProrr","prorrata"]].forEach(([id,k])=>{
@@ -915,6 +939,11 @@ function renderNomina(){
 }
 $("nomReal").oninput = ()=>{ monthData().nomReal = $("nomReal").value; saveState(); renderNomina(); };
 $("nomOtros").oninput = ()=>{ monthData().otros = $("nomOtros").value; saveState(); renderNomina(); };
+$("nomPagaExtra").oninput = ()=>{
+  const raw = $("nomPagaExtra").value;
+  if (raw === "") delete monthData().pagaExtra; else monthData().pagaExtra = raw;
+  saveState(); renderNomina();
+};
 $("nomIrpfReal").oninput = ()=>{ monthData().irpfReal = $("nomIrpfReal").value; saveState(); renderNomina(); };
 [["netTipoNom","tipoNomina"],["netIrpf","irpf"],["netRed","reduccion"],["netSS","ss"],["netTope","topeBase"],["netProrr","prorrata"]].forEach(([id,k])=>{
   $(id).onchange = ()=>{
@@ -974,6 +1003,7 @@ $("importFile").onchange = e => {
           const m = monthData(n.mes);
           if (isFinite(n.baseIrpf)) m.nomReal = String(n.baseIrpf);
           if (isFinite(n.irpf)) m.irpfReal = String(n.irpf);
+          if (isFinite(n.pagaExtra)) m.pagaExtra = String(n.pagaExtra);
           m.nominaReal = n;
         });
         const ult = data.nominas.filter(n => isFinite(n.tipoIrpf) && n.tipoIrpf > 0).sort((a,b)=>a.mes<b.mes?-1:1).pop();
